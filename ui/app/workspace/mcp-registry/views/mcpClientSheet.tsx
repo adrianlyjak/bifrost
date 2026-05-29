@@ -31,7 +31,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useDebouncedValue } from "@/hooks/useDebounce";
 import { useSheetNavigation } from "@/hooks/useSheetNavigation";
 import { MCP_STATUS_COLORS } from "@/lib/constants/config";
-import { getErrorMessage, useGetCoreConfigQuery, useGetVirtualKeysQuery, useUpdateMCPClientMutation } from "@/lib/store";
+import {
+	getErrorMessage,
+	useGetCoreConfigQuery,
+	useGetVirtualKeysQuery,
+	useInitiateMCPClientVerificationMutation,
+	useUpdateMCPClientMutation,
+} from "@/lib/store";
 import { MCPClient, MCPVKConfig } from "@/lib/types/mcp";
 import { mcpClientUpdateSchema, type MCPClientUpdateSchema } from "@/lib/types/schemas";
 import { parseArrayFromText } from "@/lib/utils/array";
@@ -70,6 +76,32 @@ export default function MCPClientSheet({
 }: MCPClientSheetProps) {
 	const hasUpdateMCPClientAccess = useRbac(RbacResource.MCPGateway, RbacOperation.Update);
 	const [updateMCPClient, { isLoading: isUpdating }] = useUpdateMCPClientMutation();
+	const [initiateVerification, { isLoading: isInitiatingVerification }] = useInitiateMCPClientVerificationMutation();
+
+	// Drives the OAuth2Authorizer dialog for a config.json-bootstrapped client
+	// sitting in pending_verification. The admin clicks Authorize → we hit
+	// initiate-verification → render the same popup-based flow the UI Create
+	// path uses.
+	const [bootstrapAuthorize, setBootstrapAuthorize] = useState<
+		| { authorizeUrl: string; oauthConfigId: string; mcpClientId: string }
+		| null
+	>(null);
+
+	const handleStartBootstrap = useCallback(async () => {
+		try {
+			const response = await initiateVerification(mcpClient.config.client_id).unwrap();
+			if (response.status === "pending_oauth" && response.authorize_url) {
+				setBootstrapAuthorize({
+					authorizeUrl: response.authorize_url,
+					oauthConfigId: response.oauth_config_id,
+					mcpClientId: mcpClient.config.client_id,
+				});
+			}
+		} catch (error) {
+			// Surfaces inline; the OAuth dialog only opens on success.
+			console.error("Failed to start MCP client verification", error);
+		}
+	}, [initiateVerification, mcpClient.config.client_id]);
 
 	const [pendingNavDirection, setPendingNavDirection] = useState<"prev" | "next" | null>(null);
 
@@ -430,7 +462,7 @@ export default function MCPClientSheet({
 
 	return (
 		<>
-			<Sheet open onOpenChange={(open) => !open && !oauthFlow && onClose()}>
+			<Sheet open onOpenChange={(open) => !open && !oauthFlow && !bootstrapAuthorize && onClose()}>
 				<SheetContent className="flex w-full flex-col overflow-x-hidden pt-4 sm:max-w-[60%]">
 					<SheetHeader className="w-full p-0 px-8 py-4" showCloseButton={false} headerClassName="mb-0 sticky -top-4 bg-card z-10">
 						<div className="flex w-full items-center justify-between">
@@ -438,8 +470,24 @@ export default function MCPClientSheet({
 								<SheetTitle className="flex w-fit items-center gap-2 font-medium">
 									{mcpClient.config.name}
 									<Badge className={MCP_STATUS_COLORS[mcpClient.state]}>{mcpClient.state}</Badge>
+								{mcpClient.state === "pending_verification" && hasUpdateMCPClientAccess && (
+									<Button
+										type="button"
+										size="sm"
+										variant="default"
+										disabled={isInitiatingVerification}
+										onClick={handleStartBootstrap}
+										data-testid="mcp-authorize-bootstrap-btn"
+									>
+										{isInitiatingVerification ? "Starting…" : "Authorize"}
+									</Button>
+								)}
 								</SheetTitle>
-								<SheetDescription>MCP server configuration and available tools</SheetDescription>
+								<SheetDescription>
+								{mcpClient.state === "pending_verification"
+									? "This client was declared in config.json and needs a one-time OAuth authorization before it can be used."
+									: "MCP server configuration and available tools"}
+							</SheetDescription>
 							</div>
 							<SheetNavigationButtons
 								hasPrev={hasPrev}
@@ -1415,6 +1463,24 @@ export default function MCPClientSheet({
 						isPerUserOauth={oauthFlow.isPerUserOauth}
 					/>
 				)}
+			{bootstrapAuthorize && (
+				<OAuth2Authorizer
+					open={!!bootstrapAuthorize}
+					onClose={() => setBootstrapAuthorize(null)}
+					onSuccess={() => {
+						toast({ title: "Success", description: "MCP client connected successfully" });
+						setBootstrapAuthorize(null);
+						onSubmitSuccess();
+						onClose();
+					}}
+					onError={(error) => {
+						toast({ title: "Authorization failed", description: error, variant: "destructive" });
+					}}
+					authorizeUrl={bootstrapAuthorize.authorizeUrl}
+					oauthConfigId={bootstrapAuthorize.oauthConfigId}
+					mcpClientId={bootstrapAuthorize.mcpClientId}
+				/>
+			)}
 			</Sheet>
 			<AlertDialog open={!!pendingNavDirection} onOpenChange={(open) => !open && setPendingNavDirection(null)}>
 				<AlertDialogContent>

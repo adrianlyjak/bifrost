@@ -232,6 +232,16 @@ export const mcpApi = baseApi.injectEndpoints({
 			}),
 			invalidatesTags: ["MCPClients"],
 		}),
+
+		// Initiate verification for a pending_verification MCP client (config.json bootstrap).
+		// Returns an OAuthFlowResponse with authorize_url + oauth_config_id; the caller
+		// drives the same OAuth2Authorizer dialog the UI Create flow uses.
+		initiateMCPClientVerification: builder.mutation<OAuthFlowResponse, string>({
+			query: (mcpClientId) => ({
+				url: `/mcp/client/${mcpClientId}/initiate-verification`,
+				method: "POST",
+			}),
+		}),
 	}),
 });
 
@@ -249,4 +259,5 @@ export const {
 	useLazyGetMCPClientsQuery,
 	useLazyGetOAuthConfigStatusQuery,
 	useCompleteOAuthFlowMutation,
+	useInitiateMCPClientVerificationMutation,
 } = mcpApi;
