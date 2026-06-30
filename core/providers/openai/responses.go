@@ -92,6 +92,18 @@ func ToOpenAIResponsesRequest(ctx *schemas.BifrostContext, bifrostReq *schemas.B
 			}
 		}
 
+		// Strip provider reasoning signatures (e.g. Gemini thoughtSignatures smuggled into
+		// call_id as "<baseID>_ts_<sig>") from tool call IDs; OpenAI rejects call_ids over 64
+		// chars. Deterministic, so a call and its output still match. Clone first — the
+		// ResponsesToolMessage pointer is shared with the caller's input.
+		if message.ResponsesToolMessage != nil && message.ResponsesToolMessage.CallID != nil {
+			if stripped := utils.StripThoughtSignature(*message.ResponsesToolMessage.CallID); stripped != *message.ResponsesToolMessage.CallID {
+				toolMsgCopy := *message.ResponsesToolMessage
+				toolMsgCopy.CallID = &stripped
+				message.ResponsesToolMessage = &toolMsgCopy
+			}
+		}
+
 		if message.ResponsesReasoning != nil {
 			isGptOss := strings.Contains(capModel, "gpt-oss")
 			isReasoning := isOpenAIReasoningModel(capModel)
