@@ -576,6 +576,18 @@ func (h *ConfigHandler) updateConfig(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// Cap auth_code_ttl so a leaked one-time code can't stay valid for long.
+	// Only enforced when discovery is enabled (both | oauth) — mirroring the
+	// disable_vk_identity check above — so a partial update switching back to
+	// headers can't dead-end on a stale value. A zero/omitted value falls back
+	// to the default at issuance and is left alone here.
+	if effectiveOAuth2Config != nil &&
+		effectiveOAuth2Config.AuthCodeTTL > configstoreTables.MaxAuthCodeTTL &&
+		(effectiveAuthMode == configstoreTables.MCPServerAuthModeBoth || effectiveAuthMode == configstoreTables.MCPServerAuthModeOAuth) {
+		SendError(ctx, fasthttp.StatusBadRequest, fmt.Sprintf("auth_code_ttl must not exceed %d seconds (15 minutes)", configstoreTables.MaxAuthCodeTTL))
+		return
+	}
+
 	// Only update each field when explicitly provided so partial /api/config
 	// payloads do not clear stored values (matches the MCP field handling above).
 	if payload.ClientConfig.MCPServerAuthMode != "" {

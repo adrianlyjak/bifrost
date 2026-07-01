@@ -1084,6 +1084,15 @@ func applyClientConfigDefaults(cc *configstore.ClientConfig) {
 	if cc.EnableLogging == nil {
 		cc.EnableLogging = new(true)
 	}
+	// Clamp the OAuth2 authorization-code TTL to its hard ceiling. The /api/config
+	// handler rejects over-max values, but config.json (and any DB row written
+	// before the cap existed) bypasses that path, so bound it here where every
+	// config source converges. A zero/omitted value is left as-is and resolves to
+	// the default at issuance.
+	if oc := cc.OAuth2ServerConfig; oc != nil && oc.AuthCodeTTL > configstoreTables.MaxAuthCodeTTL {
+		logger.Warn("oauth2_server_config.auth_code_ttl %d exceeds the maximum of %d seconds; clamping to %d", oc.AuthCodeTTL, configstoreTables.MaxAuthCodeTTL, configstoreTables.MaxAuthCodeTTL)
+		oc.AuthCodeTTL = configstoreTables.MaxAuthCodeTTL
+	}
 }
 
 // sanitizeMCPExternalOAuthURLs validates the MCP external OAuth URL overrides
